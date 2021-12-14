@@ -41,6 +41,7 @@ parser.add_argument('--basenet', default='vgg', type=str)
 parser.add_argument('--layers-frozen', default=10, type=int)
 parser.add_argument('--epochs', default=15, type=int)
 parser.add_argument('--load-model', default=False, type=bool)
+parser.add_argument('--matches', default=4991, type=int)
 args, _ = parser.parse_known_args()
 
 device = 'cuda' if (args.cuda and torch.cuda.is_available()) else 'cpu'
@@ -51,6 +52,8 @@ class ImageDataset(torch.utils.data.Dataset):
     def __init__(self, pairs, labels, transforms=None):
         self.pairs = pairs
         self.labels = labels
+        if labels == None:
+            self.labels = np.zeros((len(pairs), ))
         self.transforms = transforms
 
     def __len__(self):
@@ -95,7 +98,7 @@ class Distance(nn.Module):
     def __init__(self, indim):
         super().__init__()
         self.layers = []
-        if indim > 2048:
+        if indim >= 2048:
             self.layers.append(nn.Linear(indim*2, 2048))
             self.layers.append(nn.ReLU())
             self.layers.append(nn.BatchNorm1d(2048))
@@ -151,6 +154,19 @@ class MatchNet(nn.Module):
                 layer_num += 1
             self.encoder.fc = Identity()
             indim = 512
+        
+        if args.basenet == 'resnet50':
+            # # ResNet-50
+            self.encoder = torchvision.models.resnet50(pretrained=True)
+            layer_num = 0
+            for child in self.encoder.children():
+                if layer_num == args.layers_frozen:
+                    break
+                for param in child.parameters():
+                    param.requires_grad = False
+                layer_num += 1
+            self.encoder.fc = Identity()
+            indim = 2048
 
         self.distance = Distance(indim)
 
@@ -201,22 +217,39 @@ def make_train_step(model, loss_fn, optimizer):
 pairs = read_mapping(args.mapping)
 y = []
 
-num_matches = 4991 # Known
-non_matches = 0
+num_matches = 4991 # Known, but we can use a subset of known matches too
+num_matches = args.matches
+non_matches, matches = 0, 0
 train_pairs = []
+# for i in range(len(pairs)):
+#     if pairs[i][1] == '':
+#         if non_matches == num_matches: # Work with subset such that both classes are equally distributed
+#             continue
+#         y += [0.0] # not a match
+#         non_matches += 1
+#         train_pairs.append((pairs[i][0], f'R{torch.randint(0, int(1e6), (1,))[0]:06d}'))
+#     else:
+#         if matches == num_matches:
+#             continue
+#         y += [1.0] # match
+#         matches += 1
+#         train_pairs.append(pairs[i])
 for i in range(len(pairs)):
-    if pairs[i][1] == '':
+    if pairs[i][2] == '0':
         if non_matches == num_matches: # Work with subset such that both classes are equally distributed
             continue
         y += [0.0] # not a match
         non_matches += 1
-        train_pairs.append((pairs[i][0], f'R{torch.randint(0, int(1e6), (1,))[0]:06d}'))
+        train_pairs.append(pairs[i][:2])
     else:
+        if matches == num_matches:
+            continue
         y += [1.0] # match
-        train_pairs.append(pairs[i])
+        matches += 1
+        train_pairs.append(pairs[i][:2])
 
     
-if args.basenet == 'resnet18':
+if args.basenet[:6] == 'resnet':
     t = transforms.Compose([
         transforms.Resize(224),
         # transforms.CenterCrop(224), # This needs to change
@@ -332,5 +365,48 @@ with torch.no_grad():
 
 print("Done")
 
-# Actual evaluation invloves attaching each query in our query set with each ref from 1M images
-    
+# # Actual evaluation invloves attaching each query in our query set with each ref from 1M images
+# ref_ids = []
+# with open(args.refset, 'r') as csvfile: 
+#     csvreader = csv.reader(csvfile) 
+#     fields = next(csvreader)
+#     for row in csvreader: 
+#         ref_ids.append(row[0])
+# query_ids = []
+# with open(args.testqset, 'r') as csvfile: 
+#     csvreader = csv.reader(csvfile) 
+#     fields = next(csvreader)
+#     for row in csvreader: 
+#         query_ids.append(row[0])
+
+# pairs = []
+# for qid in query_ids:
+#     for rid in ref_ids:
+#         pairs.append([qid, rid])
+# test_dataset = ImageDataset(pairs, y=None, transforms=t)
+# testloader = DataLoader(test_dataset,
+#                         batch_size=args.batch_size,
+#                         shuffle=False,
+#                         drop_last=False,
+#                         num_workers=args.num_workers)  
+#### TODO: We also need to keep track of qid, rid. Not just the images for this part
+
+# f = open(args.result_file, 'w')
+# with torch.no_grad():
+#     for f in tqdm(testloader):
+#         Q, R = batch
+#         Q = Q.to(device)
+#         R = R.to(device)
+#         model.eval()
+#         yhat = model(Q, R)
+#         for i in range(Q.size()[0]):
+#             qid = 
+#             f.write()
+        
+#     print(f"Test loss: {np.array(testloss).mean():0.5f}")
+
+'''
+####### TODO ########
+1. Fix train and test sets. Fix the queries we use and the reference images we use for non-matching pairs
+2. Write code to evaluate accurately, ie, output in the format required by the eval script
+'''
