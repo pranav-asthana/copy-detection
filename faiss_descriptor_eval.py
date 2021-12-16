@@ -573,7 +573,7 @@ q_embed_simclr, r_embed_simclr = get_embeddings(simclr, query_ids, ref_ids, QIMG
 #xb_custom, xq_custom = evaluate_embeddings(q_embeddings, r_embeddings, n=len(query_ids),k=10,method='custom')
 
 n = len(query_ids)
-evaluate_predictions(r_embeddings, q_embeddings,5, n, pairs,  method='custom')
-evaluate_predictions(r_embed_simclr, q_embed_simclr, 5, n, pairs,  method='simclr')
+evaluate_predictions(r_embeddings, q_embeddings,10, n, pairs,  method='custom')
+evaluate_predictions(r_embed_simclr, q_embed_simclr, 10, n, pairs,  method='simclr')
 
 
