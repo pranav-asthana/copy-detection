@@ -426,15 +426,15 @@ def evaluate_predictions(ref_embeddings, query_embeddings, method='simclr'):
 
   i = 0
   for rid, rembed in r_embeddings.items():
-    if(method == 'simclr'):
-      rembed = rembed[0]
+    #if(method == 'simclr'):
+    rembed = rembed[0]
     xb[i] = rembed.to("cpu")
     i = i + 1
 
   i = 0
   for qid, qembed in q_embeddings.items():
-    if(method == 'simclr'):
-      qembed = qembed[0]
+    #if(method == 'simclr'):
+    qembed = qembed[0]
     xq[i] = qembed.to("cpu")
     i = i + 1
 
@@ -519,15 +519,15 @@ def evaluate_embeddings(q_embeddings, r_embeddings, n=5685, k=5,d =2048, method=
 
   i = 0
   for rid, rembed in r_embeddings.items():
-    if(method == 'simclr'):
-      rembed = rembed[0]
+    #if(method == 'simclr'):
+    rembed = rembed[0]
     xb[i] = rembed.to("cpu")
     i = i + 1
 
   i = 0
   for qid, qembed in q_embeddings.items():
-    if(method == 'simclr'):
-      qembed = qembed[0]
+    #if(method == 'simclr'):
+    qembed = qembed[0]
     xq[i] = qembed.to("cpu")
     i = i + 1
 
