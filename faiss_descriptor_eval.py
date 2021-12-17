@@ -450,14 +450,14 @@ def evaluate_predictions(ref_embeddings, query_embeddings, k_nn, n, pairs, metho
   xq = np.zeros((n,d)).astype('float32')
 
   i = 0
-  for rid, rembed in r_embeddings.items():
+  for rid, rembed in ref_embeddings.items():
     if(method == 'simclr'):
       rembed = rembed[0]
     xb[i] = rembed.to("cpu")
     i = i + 1
 
   i = 0
-  for qid, qembed in q_embeddings.items():
+  for qid, qembed in query_embeddings.items():
     if(method == 'simclr'):
       qembed = qembed[0]
     xq[i] = qembed.to("cpu")
@@ -532,8 +532,8 @@ def read_mapping_onlymatch(fname):
         csvreader = csv.reader(csvfile) 
         fields = next(csvreader)
         for row in csvreader: 
-            if(int(row[2:3][0]) == 1):
-              pairs.append(row[:2])
+            #if(int(row[2:3][0]) == 1):
+            pairs.append(row[:2])
     return pairs
 
 
