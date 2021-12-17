@@ -13,6 +13,7 @@ import sys
 import argparse
 import csv
 from PIL import Image
+import pickle as pkl
 from tqdm import tqdm
 
 '''
@@ -285,10 +286,15 @@ trainloader = DataLoader(trainset,
                         num_workers=args.num_workers)
 print(f'{len(pairs)} train pairs')
 
+test_t = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor()
+    ])
+
 pairs = read_mapping(args.valset)
 qr = np.array(pairs)[:, :2]
 y = np.array(pairs)[:, 2].astype(np.float32)
-valset = ImageDataset(qr, y, transforms=t)
+valset = ImageDataset(qr, y, transforms=test_t)
 valloader = DataLoader(valset,
                         batch_size=args.batch_size,
                         shuffle=False,
@@ -296,10 +302,12 @@ valloader = DataLoader(valset,
                         num_workers=args.num_workers)
 print(f'{len(pairs)} val pairs')
 
+
+
 pairs = read_mapping(args.testset)
 qr = np.array(pairs)[:, :2]
 y = np.array(pairs)[:, 2].astype(np.float32)
-testset = ImageDataset(qr, y, transforms=t)
+testset = ImageDataset(qr, y, transforms=test_t)
 testloader = DataLoader(testset,
                         batch_size=args.batch_size,
                         shuffle=False,
@@ -371,15 +379,19 @@ if not args.eval:
     
 # print("Testing")
 # test_acc = []
+# pred_proba = []
+# gt_y = []
 # with torch.no_grad():
 #     testloss = []
 #     for batch, y in tqdm(testloader):
+#         gt_y.extend(y.cpu())
 #         Q, R = batch
 #         Q = Q.to(device)
 #         R = R.to(device)
 #         y = y.to(device)
 #         model.eval()
 #         yhat = model(Q, R)
+#         pred_proba.extend(yhat.cpu())
 #         loss = loss_fn(yhat, y).item()
 #         testloss.append(loss)
 #         predictions = yhat > 0.5 # Arbitrary threshold
@@ -387,13 +399,25 @@ if not args.eval:
 #     test_acc = np.array(test_acc).mean().item()
 #     print(f"Test loss: {np.array(testloss).mean():0.5f}\t Test acc: {test_acc:0.5f}")
 
+# from sklearn.metrics import roc_curve, roc_auc_score
+# fpr, tpr, thresholds = roc_curve(gt_y, pred_proba)
+# test_auc = roc_auc_score(gt_y, pred_proba)
+# plt.figure(0).clf()
+# plt.plot(fpr,tpr,label=f"Ours - AUC: {test_auc:.5f}")
+# plt.plot([0, 1],[0, 1],label=f"Random choice")
+# plt.xlabel("False Positive Rate")
+# plt.ylabel("True Positive Rate")
+# plt.title(f"Performance on binary classification (Test set)")
+# plt.legend(loc=0)
+# plt.savefig(f"{args.saveroot}/roc.png")
 # print("Done")
+
 
 # Actual evaluation invloves attaching each query in our query set with each ref from 1M images
 if not args.eval:
     sys.exit(0)
 
-print("Actual Evaluation (VERY SLOW)")
+print("Actual Evaluation (SLOW!)")
 print("Reading refids")
 # ref_ids = []
 # with open(args.refset, 'r') as csvfile: 
@@ -419,70 +443,103 @@ with open(args.testset, 'r') as csvfile:
     for row in csvreader: 
         query_ids.append(row[0])
 
-# print("Creating pairs")
-# pairs = []
-# for qid in query_ids:
-#     for rid in ref_ids:
-#         pairs.append([qid, rid])
-# print("Creating dataset")
-# test_dataset = ImageDataset(pairs, np.zeros((len(pairs), )), transforms=t)
-# testloader = DataLoader(test_dataset,
-#                         batch_size=args.batch_size,
-#                         shuffle=False,
-#                         drop_last=False,
-#                         num_workers=args.num_workers)  
-# # We also need to keep track of qid, rid. Not just the images for this part
-
-# batchnum = 0
-# predictions = {} # q:[(r1, c1), ..(r10, c10)]
-# with torch.no_grad():
-#     for batch, y in tqdm(testloader):
-#         Q, R = batch
-#         Q = Q.to(device)
-#         R = R.to(device)
-#         model.eval()
-#         yhat = model(Q, R)
-#         for i in range(Q.size()[0]):
-#             qid = query_ids[batchnum*args.batch_size + i]
-#             rid = ref_ids[batchnum*args.batch_size + i]
-#             predictions[qid] = predictions.get(qid, []) + [(rid, yhat)]
-
 predictions = {} # q:[(r1, c1), ..(r10, c10)]
 q_embeddings = {} # qid: embedding
 r_embeddings = {} # rid: embedding
 # query_ids = query_ids[:200]
 # ref_ids = ref_ids[:200]
-with torch.no_grad():
-    model.eval()
-    for qid in tqdm(query_ids):
-        Q = Image.open(f'{args.qimgs}/{qid}{args.imsuffix}').convert('RGB')
-        Q = t(Q)
-        Q = Q.view(1, Q.size()[0], Q.size()[1], Q.size()[2])
-        Q = Q.to(device)
-        qe = model.encoder(Q)
-        q_embeddings[qid] = qe
+if os.path.exists(f'{args.saveroot}/predictions.pkl'):
+    with open(f'{args.saveroot}/predictions.pkl', 'rb') as f:
+        predictions = pkl.load(f)
+else:
+    with torch.no_grad():
+        model.eval()
+        for qid in tqdm(query_ids):
+            Q = Image.open(f'{args.qimgs}/{qid}{args.imsuffix}').convert('RGB')
+            Q = test_t(Q)
+            Q = Q.view(1, Q.size()[0], Q.size()[1], Q.size()[2])
+            Q = Q.to(device)
+            qe = model.encoder(Q)
+            q_embeddings[qid] = qe
+            
+        for rid in tqdm(ref_ids):
+            R = Image.open(f'{args.refimgs}/{rid}{args.imsuffix}').convert('RGB')
+            R = test_t(R)
+            R = R.view(1, R.size()[0], R.size()[1], R.size()[2])
+            R = R.to(device)
+            re = model.encoder(R)
+            r_embeddings[rid] = re
         
-    for rid in tqdm(ref_ids):
-        R = Image.open(f'{args.refimgs}/{rid}{args.imsuffix}').convert('RGB')
-        R = t(R)
-        R = R.view(1, R.size()[0], R.size()[1], R.size()[2])
-        R = R.to(device)
-        re = model.encoder(R)
-        r_embeddings[rid] = re
-    
-    for qid in tqdm(query_ids):
-        for rid in (ref_ids):
-            yhat = model.distance(q_embeddings[qid], r_embeddings[rid]).cpu().item()
-            predictions[qid] = predictions.get(qid, []) + [(rid, yhat)]
+        for qid in tqdm(query_ids):
+            for rid in (ref_ids):
+                yhat = model.distance(q_embeddings[qid], r_embeddings[rid]).cpu().item()
+                predictions[qid] = predictions.get(qid, []) + [(rid, yhat)]
+
+    with open(f'{args.saveroot}/predictions.pkl', 'wb') as f:
+        pkl.dump(predictions, f)
+
+def draw_below_img(img, text):
+    from PIL import ImageFont, ImageDraw, ImageOps
+    img = transforms.ToPILImage()(img)
+    img = ImageOps.expand(img, border=10, fill=(255,255,255))
+    draw = ImageDraw.Draw(img)
+    draw.text((0,0),text, (0,0,0))
+    return transforms.ToTensor()(img)
 
 print("Writing predictions to file")
 f = open(f'{args.saveroot}/predictions.csv', 'w')
 # No header required I believe
-k=10
-for q in predictions.keys():
+idx=0
+total = 0
+found = 0
+for pair in tqdm(pairs):
+    q, rid, y = pair
+    predictions[q] = list(set(predictions[q]))
     rids = np.array(predictions[q])[:, 0]
     conf = np.array(predictions[q])[:, 1]
-    topk = np.array(predictions[q])[np.argpartition(conf, -k)[-k:]]
+    conf = conf.astype(float) 
+    # print(conf.min(), conf.max(), conf.mean(), conf.std(), y)
+    # if conf.max() <= 0.945:
+    #     # No match. Do not add to the predictions file
+    #     # print("NOMATCH")
+    #     continue
+    # top_pred = np.array(predictions[q])[np.argmax(conf)]
+    # f.write(f'{q},{top_pred[0]},{top_pred[1]}\n')
+
+    k=10
+    indices = np.argpartition(conf, -k)[-k:]
+    topk = np.array(predictions[q])[indices]
+    topk = sorted(topk, key=lambda x: x[1], reverse=True)
+
+    if y == '1':
+        total += 1
+        if rid in np.array(topk)[:, 0]:
+            found += 1
+
     for topi in topk:
         f.write(f'{q},{topi[0]},{topi[1]}\n')
+    idx += 1
+    if idx > 100:
+        continue
+
+    idx += 1
+
+    Q = test_t(Image.open(f'/shared/rsaas/pka4/CV/Project/data/query/{q}.jpg').convert('RGB'))
+    # Q = draw_below_img(Q, 'query')
+    img = Q.view(1, 3, Q.size()[1], Q.size()[2])
+    R = test_t(Image.open(f'/shared/rsaas/pka4/CV/Project/data/ref/{rid}.jpg').convert('RGB'))
+    # R = draw_below_img(R, 'reference')
+    img = torch.cat([img, R.view(1, 3, R.size()[1], R.size()[2])], dim=0)
+    
+    for topi in topk:
+        R = test_t(Image.open(f'/shared/rsaas/pka4/CV/Project/data/ref/{topi[0]}.jpg').convert('RGB'))
+        # R = draw_below_img(R, f'{topi[1]}')
+        img = torch.cat([img, R.view(1, 3, R.size()[1], R.size()[2])], dim=0)
+    if y == '0':
+        save_image(img, f'/home/pka4/CV/copy-detection/test_check/nomatch_{q}.jpg', nrow=12) 
+    if y == '1':
+        save_image(img, f'/home/pka4/CV/copy-detection/test_check/match_{q}.jpg', nrow=12) 
+
+print(found, total, found/total)
+
 f.close()
